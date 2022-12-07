@@ -1,0 +1,21 @@
+service: apps
+
+useDotenv: true
+
+plugins:
+  - serverless-offline
+
+provider:
+  name: aws
+  runtime: nodejs16.x
+  region: ap-south-1
+  environment:
+    NODE_ENV: ${env:NODE_ENV}
+
+functions:
+  ping:
+    handler: dist/serverless.handler
+    events:
+      - http:
+          method: GET
+          path: /api/ping

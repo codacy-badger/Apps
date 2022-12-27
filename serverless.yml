@@ -1,21 +1,51 @@
 service: apps
 
+plugins:
+  - serverless-layers
+  - serverless-offline
+  - serverless-dotenv-plugin
+
 useDotenv: true
 
-plugins:
-  - serverless-offline
+custom:
+  serverless-layers:
+    # applies for all lambdas
+    - common:
+        dependenciesPath: ./package.json
 
 provider:
   name: aws
+  stage: ${opt:stage, 'dev'}
   runtime: nodejs16.x
   region: ap-south-1
-  environment:
-    NODE_ENV: ${env:NODE_ENV}
+  timeout: 600
+  memorySize: 2048
+  disableRollback: true
+  deploymentBucket:
+    blockPublicAccess: true
+    serverSideEncryption: aws:kms
+    name: vendorsms-${opt:stage, 'dev'}-lambda-layers
+    maxPreviousDeploymentArtifacts: 10
+
+package:
+  individually: true
+  excludeDevDependencies: true
+  patterns:
+    - "!node_modules/**"
+    - "!src"
+    - "!*.json"
+    - "!*.md"
+    - "!tests/**"
+    - "dist"
+    - "package.json"
 
 functions:
   ping:
     handler: dist/serverless.handler
+    timeout: 60
+    description: To check the health of the service
+    memorySize: 1024
     events:
       - http:
-          method: GET
+          method: get
           path: /api/ping

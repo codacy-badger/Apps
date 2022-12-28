@@ -1,1 +1,173 @@
 version: 2.1
+
+executors:
+  ci-node:
+    docker:
+      - image: cimg/node:18.12.1
+
+orbs:
+  git-shallow-clone: guitarrapc/git-shallow-clone@2.0.3
+  aws-cli: circleci/aws-cli@3.1
+  serverless-framework: circleci/serverless-framework@2.0.1
+
+workflows:
+  setup_tests_deploy:
+    jobs:
+      - setup:
+          context: aws
+      - unit_test:
+          requires:
+            - setup
+      - integration_test:
+          requires:
+            - setup
+      - deploy:
+          context: aws
+          requires:
+            - unit_test
+            - integration_test
+          filters:
+            branches:
+              only:
+                - dev
+                - prod
+
+aliases:
+  - &checkout git-shallow-clone/checkout
+  - &aws-default-profile-setup
+    aws-cli/setup:
+      aws-access-key-id: AWS_DEFAULT_ACCESS_KEY_ID
+      aws-secret-access-key: AWS_DEFAULT_SECRET_ACCESS_KEY
+      aws-region: AWS_DEFAULT_REGION
+      profile-name: default
+  - &aws-serverless-profile-setup
+    aws-cli/setup:
+      aws-access-key-id: AWS_SERVERLESS_ACCESS_KEY_ID
+      aws-secret-access-key: AWS_SERVERLESS_SECRET_ACCESS_KEY
+      aws-region: AWS_DEFAULT_REGION
+      profile-name: serverless
+  - &serverless-setup serverless-framework/setup
+  - &prepare
+    run:
+      name: Preparing the environment...
+      command: |
+        ENV=$CIRCLE_BRANCH
+        readonly APP="apps"
+
+        case $ENV in
+        "prod")
+          ENV="prod"
+          ;;
+        *)
+          ENV="dev"
+          ;;
+        esac
+
+        echo "Setting up the system for ENV: $ENV"
+
+        function _loadParametersByPath {
+          result=$(aws ssm get-parameters-by-path --path $1 --with-decryption | jq -r '.Parameters[] | {name:.Name,value:.Value,type:.Type} | @base64')
+
+          for row in $(echo "$result"); do
+            name=$(echo "$row" | base64 --decode | jq -r .name | rev | cut -d '/' -f 1 | rev)
+            value=$(echo "$row" | base64 --decode | jq -r .value)
+            type=$(echo "$row" | base64 --decode | jq -r .type)
+            eval "export $name=$value"
+
+            if [ "$type" == "SecureString" ]; then
+              echo "export $name=[secure]"
+            else
+              echo "export $name='$value'"
+            fi
+
+            echo "$name=$value" >>.env
+          done
+        }
+
+        _loadParametersByPath /personal/global
+        _loadParametersByPath /personal/global/"$ENV"
+        _loadParametersByPath /personal/"$APP"
+        _loadParametersByPath /personal/"$APP"/"$ENV"
+  - &install
+    run:
+      name: Installing Dependencies...
+      command: pnpm install
+  - &save-cache
+    save_cache:
+      name: Saving the dependencies...
+      paths:
+        - "~/project/node_modules"
+      key: apps-{{checksum "package.json"}}
+  - &restore-cache
+    restore_cache:
+      name: Restoring the dependencies...
+      key: apps-{{checksum "package.json"}}
+  - &save-properties-cache
+    save_cache:
+      name: Saving the properties...
+      paths:
+        - "~/project/.env"
+      key: apps-properties-{{checksum "package.json"}}
+  - &restore-properties-cache
+    restore_cache:
+      name: Restoring the properties...
+      key: apps-properties-{{checksum "package.json"}}
+  - &deploy
+    run:
+      name: Deploying the application...
+      command: |
+        ENV=$CIRCLE_BRANCH
+        readonly APP="apps"
+
+        case $ENV in
+        "prod")
+          ENV="prod"
+          ;;
+        *)
+          ENV="dev"
+          ;;
+        esac
+
+        echo "Setting up the system for ENV: $ENV"
+        export STAGE=$ENV
+
+        pnpm run deploy
+
+        readonly TAG=$(cat package.json | jq -r .version)
+        aws s3 sync build/ s3://personal-apps-$ENV/$APP/build/$TAG
+        aws s3 rm s3://personal-apps-$ENV/$APP/latest --recursive
+        aws s3 sync build/ s3://personal-apps-$ENV/$APP/latest
+
+jobs:
+  setup:
+    executor: ci-node
+    steps:
+      - *checkout
+      - *aws-default-profile-setup
+      - *prepare
+      - *restore-cache
+      - *restore-properties-cache
+      - *install
+      - *save-cache
+      - *save-properties-cache
+  unit_test:
+    executor: ci-node
+    steps:
+      - *checkout
+      - *restore-cache
+      - *restore-properties-cache
+  integration_test:
+    executor: ci-node
+    steps:
+      - *checkout
+      - *restore-cache
+      - *restore-properties-cache
+  deploy:
+    executor: ci-node
+    steps:
+      - *checkout
+      - *aws-serverless-profile-setup
+      - *serverless-setup
+      - *restore-cache
+      - *restore-properties-cache
+      - *deploy

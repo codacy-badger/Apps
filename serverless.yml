@@ -1,13 +1,25 @@
 service: apps
 
 plugins:
-  - serverless-layers
   - serverless-offline
   - serverless-dotenv-plugin
+  - serverless-layers
+  - serverless-domain-manager
 
 useDotenv: true
 
 custom:
+  stage: ${opt:stage, 'dev'}
+  domain:
+    dev: apps.personal.el-app.org
+    prod: apps.el-app.org
+  customDomain:
+    domainName: ${self:custom.domain.${self:custom.stage}}
+    stage: ${self:custom.stage}
+    certificateName: ${self:custom.domain.${self:custom.stage}}
+    createRoute53Record: true
+    securityPolicy: tls_1_2
+    autoDomain: true
   serverless-layers:
     # applies for all lambdas
     - common:
@@ -19,12 +31,12 @@ provider:
   runtime: nodejs16.x
   region: ap-south-1
   timeout: 600
-  memorySize: 2048
+  memorySize: 1024
   disableRollback: true
   deploymentBucket:
     blockPublicAccess: true
     serverSideEncryption: aws:kms
-    name: vendorsms-${opt:stage, 'dev'}-lambda-layers
+    name: vendorsms-${self:provider.stage}-lambda-layers
     maxPreviousDeploymentArtifacts: 10
 
 package:
@@ -44,7 +56,7 @@ functions:
     handler: dist/serverless.handler
     timeout: 60
     description: To check the health of the service
-    memorySize: 1024
+    memorySize: 512
     events:
       - http:
           method: get

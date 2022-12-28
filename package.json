@@ -14,7 +14,8 @@
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "jest",
-    "test:cov": "jest --coverage"
+    "test:cov": "jest --coverage",
+    "deploy": "pnpm build && sls deploy --aws-profile default"
   },
   "dependencies": {
     "@nestjs/common": "^9.2.1",
